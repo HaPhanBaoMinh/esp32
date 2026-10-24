@@ -1,0 +1,10 @@
+/build/
+/build-host/
+/managed_components/
+/device-backups/
+sdkconfig
+sdkconfig.old
+sdkconfig.before-*
+.cache/
+.idea/
+.vscode/

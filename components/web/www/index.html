@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 App Hub</title>
+<style>
+  :root { --bg:#0b1019; --panel:#121a27; --line:#243044; --text:#f4f7fb; --muted:#8ea0b8; --accent:#65d4a6; --warn:#f2b45c; --err:#ef6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:4px 0 12px; }
+  h2 { font-size:15px; margin:0 0 12px; color:var(--accent); text-transform:uppercase; letter-spacing:.06em; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  label { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 0; }
+  .muted { color:var(--muted); font-size:13px; }
+  input, select, button { font:inherit; color:var(--text); background:#0e1522; border:1px solid var(--line); border-radius:8px; padding:7px 10px; }
+  input[type=range] { flex:1; max-width:260px; padding:0; }
+  input[type=number] { width:90px; }
+  input[type=text], input[type=password] { width:100%; max-width:280px; }
+  input[type=checkbox] { width:18px; height:18px; accent-color:var(--accent); }
+  button { cursor:pointer; background:#243044; }
+  button.primary { background:var(--accent); color:#06281b; border-color:var(--accent); font-weight:600; }
+  button.danger { color:var(--err); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .grid { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; }
+  .app { display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--line); }
+  .app:first-child { border-top:0; }
+  .app .name { flex:1; }
+  .rule { border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px; }
+  .days { display:flex; flex-wrap:wrap; gap:4px; margin:8px 0; }
+  .days label { padding:4px 8px; border:1px solid var(--line); border-radius:6px; gap:6px; }
+  .rotations { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; }
+  .rotations button.active { border-color:var(--accent); color:var(--accent); }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 16px; display:none; }
+  progress { width:100%; height:10px; }
+  .ok { color:var(--accent); } .warn { color:var(--warn); } .err { color:var(--err); }
+</style>
+</head>
+<body>
+<main>
+  <h1>ESP32 App Hub</h1>
+
+  <section>
+    <h2>Trạng thái</h2>
+    <div class="grid" id="status"><span class="muted">Đang tải…</span></div>
+  </section>
+
+  <section>
+    <h2>Hiển thị</h2>
+    <label>Độ sáng <input type="range" id="brightness" min="1" max="100"><span id="brightnessValue" class="muted"></span></label>
+    <label>Tự chuyển app <input type="checkbox" id="autoRotate"></label>
+    <div class="muted" style="margin:8px 0 6px">Hướng màn hình</div>
+    <div class="rotations" id="rotations">
+      <button data-rotation="0">Dọc</button>
+      <button data-rotation="90">Ngang</button>
+      <button data-rotation="180">Dọc (lật)</button>
+      <button data-rotation="270">Ngang (lật)</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Apps</h2>
+    <div class="muted">Bật/tắt app trong vòng xoay và số giây hiển thị mỗi app.</div>
+    <div id="apps"></div>
+  </section>
+
+  <section>
+    <h2>Lịch hẹn giờ</h2>
+    <div class="muted">Trong khung giờ đã chọn chỉ hiển thị một app (ví dụ đồng hồ ban đêm). Khung giờ có thể qua nửa đêm.</div>
+    <div id="rules" style="margin-top:10px"></div>
+    <button id="addRule">+ Thêm lịch</button>
+  </section>
+
+  <section>
+    <h2>Thời gian</h2>
+    <label>Múi giờ
+      <select id="timezonePreset">
+        <option value="ICT-7">Việt Nam (UTC+7)</option>
+        <option value="CST-8">Singapore / Trung Quốc (UTC+8)</option>
+        <option value="JST-9">Nhật Bản (UTC+9)</option>
+        <option value="UTC0">UTC</option>
+        <option value="CET-1CEST,M3.5.0,M10.5.0/3">Châu Âu (CET)</option>
+        <option value="EST5EDT,M3.2.0,M11.1.0">Mỹ – New York</option>
+        <option value="PST8PDT,M3.2.0,M11.1.0">Mỹ – Los Angeles</option>
+        <option value="custom">Khác (POSIX TZ)…</option>
+      </select>
+    </label>
+    <label id="timezoneCustomRow" style="display:none">Chuỗi TZ <input type="text" id="timezoneCustom" placeholder="ICT-7"></label>
+  </section>
+
+  <div class="row" style="margin-bottom:14px">
+    <button class="primary" id="save">Lưu cài đặt</button>
+    <span id="saveState" class="muted"></span>
+  </div>
+
+  <section>
+    <h2>Wi-Fi</h2>
+    <label>Tên mạng (SSID) <input type="text" id="ssid" autocomplete="off"></label>
+    <label>Mật khẩu <input type="password" id="password" autocomplete="new-password"></label>
+    <div class="row"><button id="saveWifi">Kết nối</button><span class="muted">Thiết bị sẽ chuyển sang mạng mới; mở lại trang qua http://apphub.local</span></div>
+  </section>
+
+  <section>
+    <h2>Firmware (OTA)</h2>
+    <div class="muted" style="margin-bottom:8px">Chọn file <code>build/esp32_app_hub.bin</code>. Nếu bản mới lỗi màn hình, thiết bị tự quay về bản cũ.</div>
+    <div class="row"><input type="file" id="firmware" accept=".bin"><button id="upload">Cập nhật</button></div>
+    <progress id="otaProgress" value="0" max="100" style="display:none;margin-top:10px"></progress>
+    <div id="otaState" class="muted"></div>
+  </section>
+
+  <section>
+    <h2>Hệ thống</h2>
+    <button class="danger" id="reboot">Khởi động lại</button>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const DAYS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
+let settings = null;
+let dirty = false;
+
+function toast(text, cls = "") {
+  const el = $("toast");
+  el.textContent = text;
+  el.className = cls;
+  el.style.display = "block";
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (el.style.display = "none"), 2600);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
+  if (!response.ok) throw new Error((await response.text()) || response.statusText);
+  return response.json();
+}
+
+const pad = (n) => String(n).padStart(2, "0");
+const toTime = (minutes) => `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+const fromTime = (text) => { const [h, m] = text.split(":").map(Number); return h * 60 + m; };
+
+function markDirty() {
+  dirty = true;
+  $("saveState").textContent = "Có thay đổi chưa lưu";
+}
+
+function renderStatus(status) {
+  const wifi = status.wifi;
+  const wifiText = {
+    connected: `<span class="ok">Đã kết nối</span> ${wifi.ssid} (${wifi.rssi} dBm)`,
+    connecting: `<span class="warn">Đang kết nối</span> ${wifi.ssid}`,
+    setup_ap: `<span class="warn">Chế độ cài đặt</span>`,
+  }[wifi.state] || wifi.state;
+  const rows = [
+    ["Wi-Fi", wifiText],
+    ["Địa chỉ", wifi.ip ? `http://${wifi.ip} · http://apphub.local` : "—"],
+    ["AP cài đặt", wifi.ap_active ? `${wifi.ap_ssid} → http://${wifi.ap_ip}` : "tắt"],
+    ["Giờ", `${status.time} ${status.time_synced ? "" : '<span class="warn">(chưa đồng bộ)</span>'}`],
+    ["Firmware", `${status.version} · ${status.partition}`],
+    ["Uptime", `${Math.floor(status.uptime_s / 60)} phút`],
+    ["RAM trống", `${status.free_internal_kb} KB · PSRAM ${status.free_psram_kb} KB`],
+  ];
+  $("status").innerHTML = rows.map(([k, v]) => `<span class="muted">${k}</span><span>${v}</span>`).join("");
+}
+
+function renderRotation() {
+  for (const button of $("rotations").children) {
+    button.classList.toggle("active", Number(button.dataset.rotation) === settings.rotation);
+  }
+}
+
+function renderApps() {
+  $("apps").innerHTML = "";
+  settings.apps.filter((app) => app.rotatable).forEach((app) => {
+    const row = document.createElement("div");
+    row.className = "app";
+    row.innerHTML = `<input type="checkbox" ${app.enabled ? "checked" : ""}>
+      <span class="name">${app.title}</span>
+      <input type="number" min="5" max="86400" value="${app.duration}"><span class="muted">giây</span>`;
+    const [enabled, , duration] = row.children;
+    enabled.onchange = () => { app.enabled = enabled.checked; markDirty(); };
+    duration.oninput = () => { app.duration = Number(duration.value); markDirty(); };
+    $("apps").appendChild(row);
+  });
+}
+
+function renderRules() {
+  $("rules").innerHTML = "";
+  if (!settings.schedules.length) $("rules").innerHTML = '<div class="muted" style="margin-bottom:10px">Chưa có lịch.</div>';
+  settings.schedules.forEach((rule, index) => {
+    const box = document.createElement("div");
+    box.className = "rule";
+    const appOptions = settings.apps
+      .filter((app) => app.rotatable)
+      .map((app) => `<option value="${app.id}" ${app.id === rule.app ? "selected" : ""}>${app.title}</option>`)
+      .join("");
+    box.innerHTML = `
+      <div class="row">
+        <input type="checkbox" data-k="enabled" ${rule.enabled ? "checked" : ""}>
+        <input type="time" data-k="start" value="${toTime(rule.start)}"> →
+        <input type="time" data-k="end" value="${toTime(rule.end)}">
+        <select data-k="app">${appOptions}</select>
+        <button class="danger" data-k="remove">Xóa</button>
+      </div>
+      <div class="days">${DAYS.map((d, i) => `<label><input type="checkbox" data-day="${i}" ${rule.days & (1 << i) ? "checked" : ""}>${d}</label>`).join("")}</div>`;
+    box.querySelectorAll("[data-k]").forEach((el) => {
+      const key = el.dataset.k;
+      if (key === "remove") {
+        el.onclick = () => { settings.schedules.splice(index, 1); renderRules(); markDirty(); };
+        return;
+      }
+      el.onchange = () => {
+        if (key === "enabled") rule.enabled = el.checked;
+        else if (key === "app") rule.app = el.value;
+        else rule[key] = fromTime(el.value);
+        markDirty();
+      };
+    });
+    box.querySelectorAll("[data-day]").forEach((el) => {
+      el.onchange = () => {
+        const bit = 1 << Number(el.dataset.day);
+        rule.days = el.checked ? rule.days | bit : rule.days & ~bit;
+        markDirty();
+      };
+    });
+    $("rules").appendChild(box);
+  });
+}
+
+function renderTimezone() {
+  const preset = $("timezonePreset");
+  const known = [...preset.options].some((o) => o.value === settings.timezone);
+  preset.value = known ? settings.timezone : "custom";
+  $("timezoneCustom").value = settings.timezone;
+  $("timezoneCustomRow").style.display = known ? "none" : "flex";
+}
+
+function renderSettings() {
+  $("brightness").value = settings.brightness;
+  $("brightnessValue").textContent = `${settings.brightness}%`;
+  $("autoRotate").checked = settings.auto_rotate;
+  renderRotation();
+  renderApps();
+  renderRules();
+  renderTimezone();
+}
+
+async function load() {
+  const state = await api("/api/state");
+  renderStatus(state.status);
+  if (!dirty) {
+    settings = state.settings;
+    renderSettings();
+  }
+}
+
+async function save(partial) {
+  await api("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(partial),
+  });
+}
+
+// Độ sáng và hướng màn hình được áp ngay để thấy kết quả trên thiết bị.
+$("brightness").oninput = () => {
+  settings.brightness = Number($("brightness").value);
+  $("brightnessValue").textContent = `${settings.brightness}%`;
+  clearTimeout(save.brightnessTimer);
+  save.brightnessTimer = setTimeout(() => save({ brightness: settings.brightness }).catch((e) => toast(e.message, "err")), 250);
+};
+$("autoRotate").onchange = () => { settings.auto_rotate = $("autoRotate").checked; markDirty(); };
+$("rotations").onclick = async (event) => {
+  const value = event.target.dataset.rotation;
+  if (value === undefined) return;
+  settings.rotation = Number(value);
+  renderRotation();
+  try { await save({ rotation: settings.rotation }); toast("Đã đổi hướng màn hình", "ok"); }
+  catch (e) { toast(e.message, "err"); }
+};
+$("timezonePreset").onchange = () => {
+  const value = $("timezonePreset").value;
+  $("timezoneCustomRow").style.display = value === "custom" ? "flex" : "none";
+  if (value !== "custom") settings.timezone = value;
+  markDirty();
+};
+$("timezoneCustom").oninput = () => { settings.timezone = $("timezoneCustom").value.trim(); markDirty(); };
+$("addRule").onclick = () => {
+  settings.schedules.push({ enabled: true, days: 0x7f, start: 22 * 60, end: 7 * 60, app: "clock" });
+  renderRules();
+  markDirty();
+};
+
+$("save").onclick = async () => {
+  try {
+    await save({
+      auto_rotate: settings.auto_rotate,
+      brightness: settings.brightness,
+      rotation: settings.rotation,
+      timezone: settings.timezone,
+      apps: settings.apps.map(({ id, enabled, duration }) => ({ id, enabled, duration })),
+      schedules: settings.schedules,
+    });
+    dirty = false;
+    $("saveState").textContent = "Đã lưu";
+    toast("Đã lưu cài đặt", "ok");
+  } catch (e) {
+    toast(`Lỗi: ${e.message}`, "err");
+  }
+};
+
+$("saveWifi").onclick = async () => {
+  const ssid = $("ssid").value.trim();
+  if (!ssid) return toast("Nhập tên Wi-Fi", "warn");
+  try {
+    await api("/api/wifi", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ssid, password: $("password").value }),
+    });
+    $("password").value = "";
+    toast("Đang kết nối Wi-Fi mới…", "ok");
+  } catch (e) {
+    toast(`Lỗi: ${e.message}`, "err");
+  }
+};
+
+$("upload").onclick = () => {
+  const file = $("firmware").files[0];
+  if (!file) return toast("Chọn file .bin", "warn");
+  const progress = $("otaProgress");
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/ota");
+  xhr.setRequestHeader("Content-Type", "application/octet-stream");
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) progress.value = (e.loaded / e.total) * 100; };
+  xhr.onload = () => {
+    if (xhr.status === 200) {
+      $("otaState").innerHTML = '<span class="ok">Đã ghi firmware, thiết bị đang khởi động lại…</span>';
+      setTimeout(() => location.reload(), 9000);
+    } else {
+      $("otaState").innerHTML = `<span class="err">Lỗi: ${xhr.responseText}</span>`;
+    }
+  };
+  xhr.onerror = () => ($("otaState").innerHTML = '<span class="err">Mất kết nối khi upload</span>');
+  progress.style.display = "block";
+  progress.value = 0;
+  $("otaState").textContent = `Đang upload ${(file.size / 1024).toFixed(0)} KB…`;
+  xhr.send(file);
+};
+
+$("reboot").onclick = async () => {
+  if (!confirm("Khởi động lại thiết bị?")) return;
+  await api("/api/reboot", { method: "POST" }).catch(() => {});
+  toast("Đang khởi động lại…");
+  setTimeout(() => location.reload(), 6000);
+};
+
+load().catch((e) => toast(`Không tải được: ${e.message}`, "err"));
+setInterval(() => load().catch(() => {}), 5000);
+</script>
+</body>
+</html>
