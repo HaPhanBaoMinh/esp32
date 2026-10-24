@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <sys/time.h>
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -325,6 +326,18 @@ const char* state_name(const State state) noexcept {
             break;
     }
     return "stopped";
+}
+
+void set_time_from_client(const std::int64_t unix_ms) noexcept {
+    timeval value{};
+    value.tv_sec = static_cast<time_t>(unix_ms / 1'000);
+    value.tv_usec = static_cast<suseconds_t>((unix_ms % 1'000) * 1'000);
+    settimeofday(&value, nullptr);
+    std::lock_guard lock(state_mutex);
+    if (!current.time_from_client) {
+        ESP_LOGI(kTag, "Time set from web client");
+    }
+    current.time_from_client = true;
 }
 
 esp_err_t set_credentials(const std::string_view ssid, const std::string_view password) noexcept {

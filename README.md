@@ -79,10 +79,21 @@ REST API dùng cho script:
 | POST   | `/api/settings` | JSON một phần của `settings`, ví dụ `{"rotation":90}` |
 | POST   | `/api/wifi`     | `{"ssid": "...", "password": "..."}`            |
 | POST   | `/api/ota`      | Body là file `.bin`, ghi vào OTA slot còn lại   |
+| POST   | `/api/time`     | `{"unix_ms": ...}`, đặt giờ khi chưa có SNTP     |
 | POST   | `/api/reboot`   |                                                 |
 
 Web chưa có đăng nhập: ai trong cùng mạng LAN cũng mở được và có thể nạp
 firmware. Chỉ dùng trong mạng tin cậy.
+
+## Thời gian
+
+Board không có RTC giữ giờ khi mất điện. Lúc boot giờ được lấy theo thứ tự:
+
+1. SNTP (`pool.ntp.org`) ngay khi có Wi-Fi có internet.
+2. Nếu chưa có internet, mở trang web cấu hình (kể cả qua AP `AppHub-XXXX`),
+   trình duyệt sẽ tự gửi giờ của nó lên `/api/time`.
+
+Chưa có nguồn nào thì Clock hiện `Waiting for time sync`.
 
 ## Cập nhật firmware qua Wi-Fi
 

@@ -157,7 +157,7 @@ function renderStatus(status) {
     ["Wi-Fi", wifiText],
     ["Địa chỉ", wifi.ip ? `http://${wifi.ip} · http://apphub.local` : "—"],
     ["AP cài đặt", wifi.ap_active ? `${wifi.ap_ssid} → http://${wifi.ap_ip}` : "tắt"],
-    ["Giờ", `${status.time} ${status.time_synced ? "" : '<span class="warn">(chưa đồng bộ)</span>'}`],
+    ["Giờ", `${status.time} ${{ sntp: "(internet)", browser: '<span class="warn">(theo trình duyệt)</span>', none: '<span class="warn">(chưa đồng bộ)</span>' }[status.time_source] || ""}`],
     ["Firmware", `${status.version} · ${status.partition}`],
     ["Uptime", `${Math.floor(status.uptime_s / 60)} phút`],
     ["RAM trống", `${status.free_internal_kb} KB · PSRAM ${status.free_psram_kb} KB`],
@@ -247,8 +247,24 @@ function renderSettings() {
   renderTimezone();
 }
 
+// Chưa có SNTP (ví dụ đang nối AP cấu hình, không có internet): gửi giờ của
+// trình duyệt để đồng hồ chạy đúng ngay.
+async function syncClientTime(status) {
+  if (status.time_source === "sntp" || syncClientTime.done) return;
+  syncClientTime.done = true;
+  await api("/api/time", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unix_ms: Date.now() }),
+  });
+}
+
 async function load() {
-  const state = await api("/api/state");
+  let state = await api("/api/state");
+  if (state.status.time_source !== "sntp" && !syncClientTime.done) {
+    await syncClientTime(state.status).catch(() => {});
+    state = await api("/api/state");
+  }
   renderStatus(state.status);
   if (!dirty) {
     settings = state.settings;

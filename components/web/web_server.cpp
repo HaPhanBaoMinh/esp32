@@ -170,6 +170,10 @@ cJSON* status_to_json() {
                             heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
 
     cJSON_AddBoolToObject(json, "time_synced", network.time_synced);
+    cJSON_AddStringToObject(json, "time_source",
+                            network.time_synced        ? "sntp"
+                            : network.time_from_client ? "browser"
+                                                       : "none");
     const std::time_t now = std::time(nullptr);
     std::tm local{};
     localtime_r(&now, &local);
@@ -364,6 +368,22 @@ esp_err_t wifi_handler(httpd_req_t* request) {
     return ESP_OK;
 }
 
+// Trình duyệt gửi giờ của nó ({"unix_ms": Date.now()}) khi thiết bị chưa
+// đồng bộ SNTP, ví dụ lúc điện thoại đang nối vào AP cấu hình không có internet.
+esp_err_t time_handler(httpd_req_t* request) {
+    const auto json = read_json_body(request);
+    double unix_ms = 0;
+    // Chặn giá trị vô lý: phải sau 2024-01-01.
+    if (!json || !get_number(json.get(), "unix_ms", unix_ms) || unix_ms < 1'704'067'200'000.0) {
+        return send_error(request, HTTPD_400_BAD_REQUEST, "unix_ms is required");
+    }
+    if (network::status().time_synced) {
+        return send_ok(request);
+    }
+    network::set_time_from_client(static_cast<std::int64_t>(unix_ms));
+    return send_ok(request);
+}
+
 esp_err_t reboot_handler(httpd_req_t* request) {
     schedule_restart();
     return send_ok(request);
@@ -468,6 +488,7 @@ esp_err_t start(const AppRegistry& registry) noexcept {
         (result = register_uri("/api/state", HTTP_GET, state_handler)) != ESP_OK ||
         (result = register_uri("/api/settings", HTTP_POST, settings_handler)) != ESP_OK ||
         (result = register_uri("/api/wifi", HTTP_POST, wifi_handler)) != ESP_OK ||
+        (result = register_uri("/api/time", HTTP_POST, time_handler)) != ESP_OK ||
         (result = register_uri("/api/reboot", HTTP_POST, reboot_handler)) != ESP_OK ||
         (result = register_uri("/api/ota", HTTP_POST, ota_handler)) != ESP_OK) {
         return result;
