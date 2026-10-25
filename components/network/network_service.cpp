@@ -176,6 +176,9 @@ void on_wifi_event(void*, esp_event_base_t base, std::int32_t id, void* data) {
             ESP_LOGI(kTag, "Connected to '%s', open http://%s or http://%s.local",
                      current.ssid.data(), current.ip.data(), kHostname);
         }
+        // Request SNTP đầu tiên gửi lúc chưa có mạng nên thất bại, lần thử lại
+        // của lwIP cách khá xa. Gửi lại ngay khi có IP.
+        esp_netif_sntp_start();
         if (ap_active) {
             esp_timer_stop(ap_off_timer);
             esp_timer_start_once(ap_off_timer, kSetupApLingerUs);
@@ -278,6 +281,12 @@ esp_err_t start() noexcept {
     if (has_credentials() && (result = apply_sta_config()) != ESP_OK) {
         return result;
     }
+    // SNTP khởi tạo trước khi Wi-Fi chạy để handler GOT_IP luôn gọi được
+    // esp_netif_sntp_start().
+    esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    sntp_config.sync_cb = on_time_sync;
+    esp_netif_sntp_init(&sntp_config);
+
     if ((result = esp_wifi_start()) != ESP_OK) {
         return result;
     }
@@ -290,9 +299,6 @@ esp_err_t start() noexcept {
                  current.ap_ssid.data(), kSetupApPassword, current.ap_ip.data());
     }
 
-    esp_sntp_config_t sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    sntp_config.sync_cb = on_time_sync;
-    esp_netif_sntp_init(&sntp_config);
     start_mdns();
 
     started = true;
